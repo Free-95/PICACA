@@ -1,0 +1,11 @@
+{
+  "physics_weight": 0.35,
+  "sensor_weight": 0.2,
+  "b2_weight": 0.25,
+  "context_weight": 0.2,
+  "delay_threshold": 0.55,
+  "block_threshold": 0.85,
+  "hard_gate_threshold": 0.85,
+  "agreement_threshold": 0.5,
+  "b2_lookback_seconds": 30
+}

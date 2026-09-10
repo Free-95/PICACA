@@ -1,0 +1,9 @@
+{
+  "change_horizon_samples": 5,
+  "smoothing_window_samples": 9,
+  "min_support": 100,
+  "preferred_support": 300,
+  "tail_width_floor": 0.02,
+  "risk_threshold": 0.5,
+  "stable_envelope_limit": 0.05
+}

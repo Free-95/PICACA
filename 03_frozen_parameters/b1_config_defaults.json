@@ -1,0 +1,18 @@
+{
+  "low_critical": 20.0,
+  "low_warning": 25.0,
+  "normal_low": 30.0,
+  "normal_high": 75.0,
+  "high_warning": 80.0,
+  "high_critical": 90.0,
+  "fixed_lookahead_seconds": 5.0,
+  "nominal_fill_rate_pct_s": 0.05,
+  "nominal_drain_rate_pct_s": 0.05,
+  "stable_trend_abs_pct_s": 0.015,
+  "fast_trend_abs_pct_s": 0.08,
+  "delay_risk_threshold": 0.55,
+  "block_risk_threshold": 0.85,
+  "sensor_spike_mm_5s": 50.0,
+  "contradictory_trend_pct_s": 0.0887,
+  "active_flow_threshold": 1.5
+}
