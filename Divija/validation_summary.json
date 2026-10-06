@@ -1,0 +1,63 @@
+{
+  "status": "PASS",
+  "date": "2026-10-06",
+  "scope": "Final revised PICACA Stage-1 chain only; no P3/P4 code",
+  "runtime": "PICACA_STAGE1_FINAL.py",
+  "runtime_sha256": "266d6c0dd995b8543d4488ddaa7ac7f01f8055ed60d02647070c6296a0ed4f16",
+  "external_model_or_data_files_required": 0,
+  "python_external_packages_required": 0,
+  "checks": {
+    "python_compile": "PASS",
+    "built_in_self_tests": {
+      "status": "PASS",
+      "cases": 4
+    },
+    "b1_prime_synthetic_comparison": {
+      "status": "PASS",
+      "cases": 362
+    },
+    "full_recording_decision_reproduction": {
+      "status": "PASS",
+      "rows": 449919,
+      "command_rows": 740,
+      "b1_decision_mismatches": 0,
+      "b3_decision_mismatches": 0,
+      "b4_decision_mismatches": 0,
+      "command_b3_mismatches": 0,
+      "command_b4_mismatches": 0,
+      "physics_risk_mismatches": 4,
+      "sensor_risk_mismatches": 0,
+      "physics_risk_mismatch_examples": [
+        {
+          "timestamp": "2015-12-31 21:01:59",
+          "command": "NO_COMMAND",
+          "runtime": 0.416357,
+          "frozen": 0.4177
+        },
+        {
+          "timestamp": "2015-12-31 21:02:00",
+          "command": "NO_COMMAND",
+          "runtime": 0.415834,
+          "frozen": 0.4156
+        },
+        {
+          "timestamp": "2015-12-31 21:02:01",
+          "command": "NO_COMMAND",
+          "runtime": 0.414525,
+          "frozen": 0.4143
+        },
+        {
+          "timestamp": "2015-12-31 21:02:02",
+          "command": "NO_COMMAND",
+          "runtime": 0.411909,
+          "frozen": 0.4082
+        }
+      ]
+    },
+    "hardware_modbus_map_protocol": "PASS",
+    "proxy_pre_execution_authorization": "PASS",
+    "proxy_wire_allow_forward_and_block_suppress": "PASS",
+    "runtime_monotonic_safety_assertions": "B3 severity >= B1 and B4 severity >= B3"
+  },
+  "frozen_config_file_sha256": "8da6ccd79979f5dea4d6c043a0fc4f6de2a22d21e12a3898964b382b222483c5"
+}

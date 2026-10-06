@@ -39,9 +39,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # PATH CONFIGURATION
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 SCRIPT_DIR   = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 
@@ -58,9 +58,9 @@ REPORT_PATH  = PROJECT_ROOT / "CONTEXT_RISK_V3_REPORT.md"
 for _d in [PLOTS_DIR, ARTIFACTS]:
     _d.mkdir(parents=True, exist_ok=True)
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # CONSTANTS
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 CALIB_FRAC   = 0.80          # first 80% of Normal rows → calibration
 LAPLACE_K    = 1             # Laplace smoothing addend
 MIN_SUPPORT  = 3             # transitions seen < MIN_SUPPORT → "sparse"
@@ -75,9 +75,9 @@ WEIGHT_PHASE = 0.15
 LEVELS = [(0.85, "VERY_HIGH"), (0.60, "HIGH"), (0.30, "MEDIUM"), (0.00, "LOW")]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 1. LOAD DATA
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 def load_data() -> pd.DataFrame:
     if not INPUT_PATH.exists():
         sys.exit(f"[ERROR] Input file not found: {INPUT_PATH}")
@@ -86,6 +86,14 @@ def load_data() -> pd.DataFrame:
     df = pd.read_csv(INPUT_PATH, parse_dates=["Timestamp"])
     df = df.sort_values("Timestamp").reset_index(drop=True)
 
+    req_cols = [
+        "Timestamp", "event_type", "event_value", "process_phase", "Normal/Attack",
+        "command_frequency", "command_frequency_60s", "command_repetition", "consecutive_same_command"
+    ]
+    missing = [c for c in req_cols if c not in df.columns]
+    if missing:
+        sys.exit(f"[ERROR] Missing required input columns in {INPUT_PATH}: {missing}")
+
     print(f"  Rows loaded : {len(df):,}")
     print(f"  Normal      : {(df['Normal/Attack']=='Normal').sum():,}")
     print(f"  Attack      : {(df['Normal/Attack']=='Attack').sum():,}")
@@ -93,9 +101,9 @@ def load_data() -> pd.DataFrame:
     return df
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 2. CALIBRATION SPLIT  (NO SHUFFLE — chronological)
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 def create_calibration_split(df: pd.DataFrame):
     normal_idx = df.index[df["Normal/Attack"] == "Normal"].tolist()
     attack_idx = df.index[df["Normal/Attack"] == "Attack"].tolist()
@@ -111,9 +119,9 @@ def create_calibration_split(df: pd.DataFrame):
     return calib_idx, valid_idx, attack_idx
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 3. COMMAND-ROW FEATURES  (timing — causal only)
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 def create_command_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute time_since_last_command and time_since_same_command causally.
@@ -121,8 +129,8 @@ def create_command_features(df: pd.DataFrame) -> pd.DataFrame:
     Compound events (P101_OFF;P102_ON) count as ONE command-row.
     """
     df = df.copy()
-    ts  = df["Timestamp"].values
-    et  = df["event_type"].values
+    ts_sec = (df["Timestamp"].astype("int64") // 10**9).values
+    et     = df["event_type"].values
 
     tslc  = np.full(len(df), np.nan, dtype=float)  # time_since_last_command
     tssc  = np.full(len(df), np.nan, dtype=float)  # time_since_same_command
@@ -132,7 +140,7 @@ def create_command_features(df: pd.DataFrame) -> pd.DataFrame:
 
     for i in range(len(df)):
         cmd = et[i]
-        t   = ts[i].astype("datetime64[s]").astype(float)  # epoch seconds
+        t   = float(ts_sec[i])  # epoch seconds
 
         if cmd != "NONE":
             # time since last ANY command
@@ -150,9 +158,9 @@ def create_command_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 4. FIT MODELS ON CALIBRATION DATA
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def fit_frequency_model(df: pd.DataFrame, calib_idx: list) -> dict:
     """
@@ -254,7 +262,7 @@ def fit_markov_model(df: pd.DataFrame, calib_idx: list) -> dict:
     all_cmds   = sorted(cmd_rows["event_type"].unique().tolist())
     all_phases = sorted(cmd_rows["process_phase"].unique().tolist())
 
-    # ── P(cmd | prev_cmd) ────────────────────────────────────────────────────
+    # -- P(cmd | prev_cmd) ----------------------------------------------------
     # count[prev][curr] = count
     count_prev = defaultdict(lambda: defaultdict(int))
     for i in range(1, len(cmd_rows)):
@@ -262,7 +270,7 @@ def fit_markov_model(df: pd.DataFrame, calib_idx: list) -> dict:
         curr = cmd_rows.at[i,   "event_type"]
         count_prev[prev][curr] += 1
 
-    # ── P(cmd | prev_cmd, phase) ─────────────────────────────────────────────
+    # -- P(cmd | prev_cmd, phase) ---------------------------------------------
     count_prev_phase = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
     for i in range(1, len(cmd_rows)):
         prev  = cmd_rows.at[i-1, "event_type"]
@@ -270,7 +278,7 @@ def fit_markov_model(df: pd.DataFrame, calib_idx: list) -> dict:
         phase = cmd_rows.at[i,   "process_phase"]
         count_prev_phase[prev][phase][curr] += 1
 
-    # ── P(cmd | phase) ────────────────────────────────────────────────────────
+    # -- P(cmd | phase) --------------------------------------------------------
     count_phase = defaultdict(lambda: defaultdict(int))
     for _, row in cmd_rows.iterrows():
         count_phase[row["process_phase"]][row["event_type"]] += 1
@@ -344,9 +352,9 @@ def fit_phase_rarity_model(df: pd.DataFrame, calib_idx: list) -> dict:
     return model, all_cmds, all_phases
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 5. CALCULATE RISK COMPONENTS (row-wise, vectorised where possible)
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def _sigmoid_risk(value: float, low: float, high: float) -> float:
     """Map value into [0,1] using a linear ramp between low and high thresholds."""
@@ -392,8 +400,10 @@ def calc_risk_cmd_timing(row, timing_model: dict) -> float:
 
     def lognorm_tail_risk(t, params) -> float:
         """P(T < t) under lognormal — very short inter-arrival = suspicious."""
-        if np.isnan(t) or t <= 0:
+        if np.isnan(t):
             return 0.0
+        if t <= 0:
+            return 0.7  # Maximum fast-arrival risk for 0s gap (simultaneous events)
         log_t = np.log(t)
         mu    = params["mu"]
         sigma = params["sigma"]
@@ -446,7 +456,7 @@ def calc_risk_command_sequence(
     all_cmds   = mm["all_cmds"]
     all_phases = mm["all_phases"]
 
-    # ── compute probability ────────────────────────────────────────────────────
+    # -- compute probability ----------------------------------------------------
     if prev is None:
         # No previous command seen — use P(cmd | phase) as prior
         if phase in mm["markov_phase"]:
@@ -473,7 +483,7 @@ def calc_risk_command_sequence(
 
     is_sparse = (support is not None) and (support < MIN_SUPPORT)
 
-    # ── convert probability to risk ──────────────────────────────────────────
+    # -- convert probability to risk ------------------------------------------
     # Lower probability → higher risk.
     # We use -log(p) normalised to [0,1] via the min/max over all
     # smoothed probabilities in this vocabulary.
@@ -530,9 +540,9 @@ def calc_risk_phase_rarity(row, phase_model: dict, all_cmds: list, all_phases: l
     return float(np.clip(neg_log / max_nl, 0.0, 1.0))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 6. APPLY ALL RISK COMPONENTS IN ONE PASS
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def calculate_risk_components(
     df: pd.DataFrame,
@@ -578,9 +588,9 @@ def calculate_risk_components(
     return df
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 7. CANDIDATE SCORES & CONTEXT LEVEL
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def calculate_candidate_scores(df: pd.DataFrame) -> pd.DataFrame:
     rf  = df["risk_cmd_frequency"]
@@ -613,33 +623,44 @@ def calculate_candidate_scores(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 8. CONTEXT REASON
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def generate_context_reason(df: pd.DataFrame, threshold: float = 0.3) -> pd.DataFrame:
-    reasons = []
-    for _, row in df.iterrows():
-        parts = []
-        if row["risk_cmd_frequency"]    >= threshold: parts.append("HIGH_COMMAND_FREQUENCY")
-        if row["risk_cmd_repetition"]   >= threshold: parts.append("HIGH_COMMAND_REPETITION")
-        if row["risk_cmd_timing"]       >= threshold: parts.append("RARE_COMMAND_TIMING")
-        if row["risk_command_sequence"] >= threshold: parts.append("RARE_COMMAND_SEQUENCE")
-        if row["risk_phase_rarity"]     >= threshold: parts.append("RARE_COMMAND_PHASE")
+    rf = (df["risk_cmd_frequency"].values >= threshold)
+    rr = (df["risk_cmd_repetition"].values >= threshold)
+    rt = (df["risk_cmd_timing"].values >= threshold)
+    rs = (df["risk_command_sequence"].values >= threshold)
+    rp = (df["risk_phase_rarity"].values >= threshold)
 
-        if len(parts) == 0:
-            reasons.append("NORMAL_CONTEXT")
-        elif len(parts) == 1:
-            reasons.append(parts[0])
-        else:
-            reasons.append("MULTIPLE_CONTEXT_ANOMALIES")
+    masks = [rf, rr, rt, rs, rp]
+    names = [
+        "HIGH_COMMAND_FREQUENCY",
+        "HIGH_COMMAND_REPETITION",
+        "RARE_COMMAND_TIMING",
+        "RARE_COMMAND_SEQUENCE",
+        "RARE_COMMAND_PHASE"
+    ]
+
+    count = np.zeros(len(df), dtype=int)
+    for m in masks:
+        count += m.astype(int)
+
+    reasons = np.full(len(df), "NORMAL_CONTEXT", dtype=object)
+    reasons[count > 1] = "MULTIPLE_CONTEXT_ANOMALIES"
+
+    for m, name in zip(masks, names):
+        single_mask = (count == 1) & m
+        reasons[single_mask] = name
+
     df["context_reason"] = reasons
     return df
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 9. SPARSE / UNSEEN TRANSITION AUDIT
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def sparse_transition_audit(df: pd.DataFrame, markov_model: dict) -> dict:
     """
@@ -663,7 +684,7 @@ def sparse_transition_audit(df: pd.DataFrame, markov_model: dict) -> dict:
             sup = support.get(prev, {}).get(cmd, 0)
             if sup < MIN_SUPPORT:
                 sparse_count += 1
-                transition_counter[f"{prev} → {cmd}"] += 1
+                transition_counter[f"{prev} -> {cmd}"] += 1
                 if row["risk_command_sequence"] >= HIGH_SEQ_RISK_THRESH:
                     high_risk_sparse += 1
         prev_cmd_state["last_cmd"] = cmd
@@ -689,9 +710,9 @@ def sparse_transition_audit(df: pd.DataFrame, markov_model: dict) -> dict:
     return result
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 10. EVALUATION
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def _risk_stats(vals: pd.Series, label: str):
     v = vals.dropna()
@@ -712,7 +733,7 @@ def evaluate_model(df: pd.DataFrame, calib_idx: list, valid_idx: list, attack_id
     print("="*60)
 
     for score_col in ["context_risk_max", "context_risk_weighted"]:
-        print(f"\n{'─'*50}")
+        print(f"\n{'-'*50}")
         print(f"  Score: {score_col}")
         _risk_stats(norm_val[score_col], "Normal Validation")
         _risk_stats(atk[score_col],      "Attack Test")
@@ -734,9 +755,9 @@ def evaluate_model(df: pd.DataFrame, calib_idx: list, valid_idx: list, attack_id
         print(f"\n  ROC/PR-AUC error: {e}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 11. METRICS FILES
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def generate_metrics(df: pd.DataFrame, calib_idx: list, valid_idx: list, attack_idx: list):
     norm_all  = df[df["Normal/Attack"] == "Normal"]
@@ -811,9 +832,9 @@ def generate_metrics(df: pd.DataFrame, calib_idx: list, valid_idx: list, attack_
     print(f"Saved top examples: {OUT_TOPEX}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 12. PLOTS
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def generate_plots(df: pd.DataFrame, valid_idx: list, attack_idx: list):
     norm_val = df.loc[valid_idx]
@@ -895,9 +916,9 @@ def generate_plots(df: pd.DataFrame, valid_idx: list, attack_idx: list):
     print(f"\nAll plots saved to {PLOTS_DIR}/")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 13. SAVE OUTPUTS
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def save_outputs(df: pd.DataFrame, freq_model, rep_model, timing_model,
                  markov_model, phase_model, all_cmds, all_phases,
@@ -949,9 +970,69 @@ def save_outputs(df: pd.DataFrame, freq_model, rep_model, timing_model,
     print(f"Saved calibration artifacts: {ARTIFACTS / 'v3_calibration.json'}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
+# 14. REPORT GENERATION
+# ------------------------------------------------------------------------------
+
+def generate_report(
+    df: pd.DataFrame,
+    calib_idx: list,
+    valid_idx: list,
+    attack_idx: list,
+    sparse_audit: dict,
+    freq_model: dict,
+    rep_model: dict,
+    timing_model: dict,
+    markov_model: dict,
+):
+    norm_val = df.loc[valid_idx]
+    atk      = df.loc[attack_idx]
+
+    report_lines = [
+        "# Context Risk V3 Model Report — SWaT Stage 1\n\n",
+        "## Executive Summary\n",
+        "Context Risk V3 evaluates pure command-context anomalies without relying on physical state predictions or process alarm thresholds.\n\n",
+        "## Model Configuration & Weights\n",
+        f"- **Calibration Fraction**: {CALIB_FRAC * 100:.0f}% Normal rows\n",
+        f"- **Laplace Smoothing Addend (k)**: {LAPLACE_K}\n",
+        f"- **Minimum Transition Support**: {MIN_SUPPORT}\n",
+        "- **Component Weights**:\n",
+        f"  - Command Frequency: `{WEIGHT_FREQ:.2f}`\n",
+        f"  - Command Repetition: `{WEIGHT_REP:.2f}`\n",
+        f"  - Command Timing: `{WEIGHT_TIM:.2f}`\n",
+        f"  - Command Sequence (Markov): `{WEIGHT_SEQ:.2f}`\n",
+        f"  - Phase Rarity: `{WEIGHT_PHASE:.2f}`\n\n",
+        "## Calibration Statistics\n",
+        f"- **Calibration Rows**: {len(calib_idx):,} Normal rows\n",
+        f"- **Validation Rows**: {len(valid_idx):,} Normal rows\n",
+        f"- **Attack Test Rows**: {len(attack_idx):,} Attack rows\n",
+        f"- **Command Types**: {len(markov_model['all_cmds'])}\n",
+        f"- **Process Phases**: {len(markov_model['all_phases'])}\n\n",
+        "## Sparse / Unseen Transition Audit\n",
+        f"- **Total Normal Command Rows**: {sparse_audit.get('total_normal_cmd_rows', 0):,}\n",
+        f"- **Sparse Transitions (<{MIN_SUPPORT} support)**: {sparse_audit.get('sparse_transition_rows', 0):,} ({sparse_audit.get('sparse_pct', 0)}%)\n",
+        f"- **High-Risk Sparse Rows**: {sparse_audit.get('high_risk_sparse_rows', 0):,} ({sparse_audit.get('high_risk_sparse_pct', 0)}% of sparse)\n\n",
+        "## Performance Summary\n",
+        f"- **Normal Validation Mean Risk (Max / Weighted)**: `{norm_val['context_risk_max'].mean():.4f}` / `{norm_val['context_risk_weighted'].mean():.4f}`\n",
+        f"- **Attack Test Mean Risk (Max / Weighted)**: `{atk['context_risk_max'].mean():.4f}` / `{atk['context_risk_weighted'].mean():.4f}`\n\n",
+        "## Output Files Generated\n",
+        f"- Main CSV: `{OUT_CSV.name}`\n",
+        f"- Metrics: `{OUT_METRICS.name}`\n",
+        f"- Command Metrics: `{OUT_CMD_MET.name}`\n",
+        f"- Threshold Curve: `{OUT_THRESH.name}`\n",
+        f"- Top Examples: `{OUT_TOPEX.name}`\n",
+        f"- Artifacts: `{ARTIFACTS / 'v3_calibration.json'}`\n",
+        f"- Plots Directory: `{PLOTS_DIR}`\n",
+    ]
+
+    with open(REPORT_PATH, "w", encoding="utf-8") as f:
+        f.writelines(report_lines)
+    print(f"\nSaved report: {REPORT_PATH}")
+
+
+# ------------------------------------------------------------------------------
 # MAIN PIPELINE
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 
 def main():
     t0 = time.time()
@@ -1002,6 +1083,10 @@ def main():
     save_outputs(df, freq_model, rep_model, timing_model,
                  markov_model, phase_model, all_cmds, all_phases,
                  sparse_audit)
+
+    # 13. Generate report
+    generate_report(df, calib_idx, valid_idx, attack_idx, sparse_audit,
+                    freq_model, rep_model, timing_model, markov_model)
 
     elapsed = time.time() - t0
     print(f"\n[DONE] Total runtime: {elapsed:.1f}s")

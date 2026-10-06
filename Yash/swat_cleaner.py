@@ -4,6 +4,7 @@ import numpy as np
 
 PROJECT_DIR = r"e:\ISA_PROJECT"
 PROCESSED_DIR = os.path.join(PROJECT_DIR, "processed")
+NETWORK_DIR = os.path.join(PROJECT_DIR, "Network")
 NORMAL_RAW = os.path.join(PROJECT_DIR, "normal.csv")
 ATTACK_RAW = os.path.join(PROJECT_DIR, "attack.csv")
 MERGED_RAW = os.path.join(PROJECT_DIR, "merged.csv")
